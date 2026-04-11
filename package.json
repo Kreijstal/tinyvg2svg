@@ -1,0 +1,33 @@
+{
+  "name": "tinyvg2svg",
+  "version": "1.0.0",
+  "description": "A TinyVG to SVG converter - transform TinyVG vector graphics into standard SVG format",
+  "main": "dist/index.js",
+  "bin": {
+    "tinyvg2svg": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "lint": "eslint src/"
+  },
+  "keywords": [
+    "tinyvg",
+    "svg",
+    "converter",
+    "vector-graphics",
+    "tvg"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ]
+}
