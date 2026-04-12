@@ -92,7 +92,7 @@ function main(): void {
 
   try {
     // Read input file
-    const inputData = fs.readFileSync(inputPath);
+    const inputData = new Uint8Array(fs.readFileSync(inputPath));
 
     // Parse TinyVG
     const doc = parseTinyVG(inputData);

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:web": "mkdir -p dist-web && esbuild src/web.ts --bundle --minify --outfile=dist-web/app.js --format=esm --target=es2020 && cp web/index.html dist-web/",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "lint": "eslint src/"
@@ -22,8 +23,9 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "typescript": "^5.3.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.3.0"
   },
   "files": [
     "dist/",

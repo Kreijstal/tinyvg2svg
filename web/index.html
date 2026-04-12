@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TinyVG Converter</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin: 2rem 0 0.5rem;
+      font-size: 1.8rem;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
+    .container {
+      display: flex;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 1200px;
+      padding: 0 1.5rem;
+      flex: 1;
+    }
+    .panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-header h2 { font-size: 1.1rem; color: #cbd5e1; }
+    .drop-zone {
+      border: 2px dashed #334155;
+      border-radius: 12px;
+      padding: 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: #1e293b;
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #60a5fa;
+      background: #1e293b;
+    }
+    .drop-zone .icon { font-size: 2rem; opacity: 0.5; }
+    .drop-zone p { color: #94a3b8; font-size: 0.9rem; }
+    .preview-area {
+      flex: 1;
+      background: #1e293b;
+      border-radius: 12px;
+      overflow: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 300px;
+      position: relative;
+    }
+    .preview-area svg { max-width: 100%; max-height: 100%; }
+    .preview-area img { max-width: 100%; max-height: 100%; }
+    .preview-area .checkerboard {
+      position: absolute; inset: 0; border-radius: 12px;
+      background-image:
+        linear-gradient(45deg, #263043 25%, transparent 25%),
+        linear-gradient(-45deg, #263043 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #263043 75%),
+        linear-gradient(-45deg, transparent 75%, #263043 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+      z-index: 0;
+    }
+    .preview-area .content { position: relative; z-index: 1; padding: 1rem; }
+    button {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.15s;
+    }
+    button:hover { background: #334155; border-color: #60a5fa; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.primary {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: white;
+    }
+    button.primary:hover { background: #2563eb; }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .info {
+      font-size: 0.8rem;
+      color: #64748b;
+      padding: 0.5rem 0.75rem;
+      background: #1e293b;
+      border-radius: 8px;
+    }
+    .error {
+      color: #f87171;
+      background: #1e293b;
+      border: 1px solid #7f1d1d;
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-size: 0.85rem;
+    }
+    .arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #475569;
+      padding-top: 4rem;
+    }
+    footer {
+      padding: 1.5rem;
+      text-align: center;
+      color: #475569;
+      font-size: 0.8rem;
+    }
+    footer a { color: #60a5fa; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+    .hidden { display: none !important; }
+
+    @media (max-width: 768px) {
+      .container { flex-direction: column; }
+      .arrow { transform: rotate(90deg); padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h1>TinyVG Converter</h1>
+  <p class="subtitle">Convert between TinyVG (.tvg) and SVG formats in your browser</p>
+
+  <div class="container">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Input</h2>
+      </div>
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">&#128196;</div>
+        <p><strong>Drop a .tvg or .svg file here</strong></p>
+        <p>or click to browse</p>
+        <input type="file" id="fileInput" accept=".tvg,.svg" style="display:none">
+      </div>
+      <div id="inputInfo" class="info hidden"></div>
+      <div id="inputError" class="error hidden"></div>
+      <div class="preview-area" id="inputPreview">
+        <div class="checkerboard"></div>
+        <div class="content" id="inputPreviewContent">
+          <p style="color:#64748b">Preview will appear here</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">&#10230;</div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Output</h2>
+      </div>
+      <div class="actions">
+        <button id="downloadBtn" class="primary" disabled>Download</button>
+        <button id="copyBtn" disabled>Copy SVG</button>
+      </div>
+      <div id="outputInfo" class="info hidden"></div>
+      <div id="outputError" class="error hidden"></div>
+      <div class="preview-area" id="outputPreview">
+        <div class="checkerboard"></div>
+        <div class="content" id="outputPreviewContent">
+          <p style="color:#64748b">Converted output will appear here</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <a href="https://tinyvg.tech/" target="_blank">TinyVG Spec</a> &middot;
+    Powered by <a href="https://github.com/Kreijstal/tinyvg2svg" target="_blank">tinyvg2svg</a>
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

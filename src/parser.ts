@@ -43,11 +43,13 @@ export class ParseError extends Error {
  * Binary reader with position tracking for parsing TinyVG data
  */
 class BinaryReader {
-  private data: Buffer;
+  private data: Uint8Array;
+  private view: DataView;
   private pos: number = 0;
 
-  constructor(data: Buffer) {
+  constructor(data: Uint8Array) {
     this.data = data;
+    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   }
 
   get position(): number {
@@ -72,13 +74,13 @@ class BinaryReader {
     return this.data[this.pos++];
   }
 
-  readBytes(count: number): Buffer {
+  readBytes(count: number): Uint8Array {
     if (this.pos + count > this.data.length) {
       throw new ParseError(`Unexpected end of data while reading ${count} bytes`);
     }
-    const slice = this.data.subarray(this.pos, this.pos + count);
+    const slice = this.data.slice(this.pos, this.pos + count);
     this.pos += count;
-    return Buffer.from(slice);
+    return slice;
   }
 
   readUint8(): number {
@@ -89,7 +91,7 @@ class BinaryReader {
     if (this.pos + 2 > this.data.length) {
       throw new ParseError("Unexpected end of data while reading u16");
     }
-    const val = this.data.readUInt16LE(this.pos);
+    const val = this.view.getUint16(this.pos, true);
     this.pos += 2;
     return val;
   }
@@ -98,7 +100,7 @@ class BinaryReader {
     if (this.pos + 4 > this.data.length) {
       throw new ParseError("Unexpected end of data while reading u32");
     }
-    const val = this.data.readUInt32LE(this.pos);
+    const val = this.view.getUint32(this.pos, true);
     this.pos += 4;
     return val;
   }
@@ -107,7 +109,7 @@ class BinaryReader {
     if (this.pos + 4 > this.data.length) {
       throw new ParseError("Unexpected end of data while reading f32");
     }
-    const val = this.data.readFloatLE(this.pos);
+    const val = this.view.getFloat32(this.pos, true);
     this.pos += 4;
     return val;
   }
@@ -219,7 +221,7 @@ class BinaryReader {
 /**
  * Parse a TinyVG binary file and return a structured document
  */
-export function parseTinyVG(data: Buffer): TinyVGDocument {
+export function parseTinyVG(data: Uint8Array): TinyVGDocument {
   const reader = new BinaryReader(data);
 
   // --- Parse Header ---
@@ -655,7 +657,7 @@ function readCommand(
       const height = reader.readUnit(scale, coordinateRange);
       const textLength = reader.readVarUInt();
       const textBytes = reader.readBytes(textLength);
-      const text = textBytes.toString("utf-8");
+      const text = new TextDecoder().decode(textBytes);
       const glyphLength = reader.readVarUInt();
       const glyphOffsets: Array<[number, number]> = [];
       for (let i = 0; i < glyphLength; i++) {
