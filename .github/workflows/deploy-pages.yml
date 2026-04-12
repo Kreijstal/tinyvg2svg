@@ -21,10 +21,26 @@ jobs:
       with:
         node-version: latest
 
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Install wasm-bindgen-cli
+      run: cargo install wasm-bindgen-cli
+
     - name: Install dependencies
       run: npm install
 
-    - name: Build and copy assets
+    - name: Build WASM (SVG->TVG via usvg)
+      run: npm run build:wasm
+
+    - name: Optimize WASM
+      run: |
+        sudo apt-get install -y binaryen
+        wasm-opt -Oz web/wasm/svg2tvg_bg.wasm -o web/wasm/svg2tvg_bg.wasm
+
+    - name: Build web assets
       run: |
         npm run build
         npm run build:web

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:web": "mkdir -p dist-web && esbuild src/web.ts --bundle --minify --outfile=dist-web/app.js --format=esm --target=es2020 && cp web/index.html dist-web/",
+    "build:web": "mkdir -p dist-web/wasm && esbuild src/web.ts --bundle --minify --outfile=dist-web/app.js --format=esm --target=es2020 && cp web/index.html dist-web/ && cp web/wasm/svg2tvg.js web/wasm/svg2tvg_bg.wasm dist-web/wasm/",
+    "build:wasm": "cd crates/svg2tvg-wasm && cargo build --target wasm32-unknown-unknown --release && wasm-bindgen target/wasm32-unknown-unknown/release/svg2tvg_wasm.wasm --target web --no-typescript --out-dir ../../web/wasm --out-name svg2tvg",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "lint": "eslint src/"

@@ -1,11 +1,48 @@
 /**
  * Web application entry point for TinyVG <-> SVG converter
+ * Uses WASM (usvg-based) for SVG->TVG, TypeScript for TVG->SVG
  */
 
 import { parseTinyVG, ParseError } from "./parser";
 import { generateSVG } from "./generator";
-import { serializeTinyVG } from "./serializer";
-import { svgToTinyVG } from "./svg2tvg";
+
+// WASM module for SVG->TVG conversion
+let wasmConvert: ((svg: Uint8Array) => Uint8Array) | null = null;
+let wasmReady = false;
+let wasmError: string | null = null;
+
+// Load the WASM module at runtime (not bundled)
+async function initWasm() {
+  try {
+    // Use dynamic import so esbuild doesn't try to bundle this
+    const wasmUrl = new URL("./wasm/svg2tvg.js", window.location.href).href;
+    const wasm = await import(/* webpackIgnore: true */ wasmUrl);
+    await wasm.default();
+    wasmConvert = wasm.convert_svg_to_tvg;
+    wasmReady = true;
+    updateWasmStatus();
+  } catch (e) {
+    wasmError = `WASM load failed: ${e}`;
+    updateWasmStatus();
+  }
+}
+
+function updateWasmStatus() {
+  const el = document.getElementById("wasmStatus");
+  if (!el) return;
+  if (wasmReady) {
+    el.textContent = "WASM engine loaded (usvg)";
+    el.style.color = "#4ade80";
+  } else if (wasmError) {
+    el.textContent = wasmError;
+    el.style.color = "#f87171";
+  } else {
+    el.textContent = "Loading WASM engine...";
+    el.style.color = "#94a3b8";
+  }
+}
+
+initWasm();
 
 const dropZone = document.getElementById("dropZone")!;
 const fileInput = document.getElementById("fileInput") as HTMLInputElement;
@@ -54,7 +91,6 @@ function clearInput() {
 
 function previewSvg(container: HTMLElement, svgText: string) {
   container.innerHTML = svgText;
-  // Ensure SVG fits
   const svg = container.querySelector("svg");
   if (svg) {
     svg.style.maxWidth = "100%";
@@ -74,10 +110,8 @@ function handleTVGInput(data: Uint8Array, filename: string) {
 
     const svgText = generateSVG(doc, true);
 
-    // Show input preview as SVG
     previewSvg(inputPreviewContent, svgText);
 
-    // Output is SVG
     outputSvgText = svgText;
     outputBlob = new Blob([svgText], { type: "image/svg+xml" });
     outputFilename = filename.replace(/\.tvg$/i, ".svg");
@@ -101,8 +135,13 @@ function handleSVGInput(svgText: string, filename: string) {
     previewSvg(inputPreviewContent, svgText);
     showInfo(inputInfo, `${filename} - ${svgText.length} bytes`);
 
-    const doc = svgToTinyVG(svgText);
-    const tvgData = serializeTinyVG(doc);
+    if (!wasmReady || !wasmConvert) {
+      showError(outputError, "WASM engine not loaded yet. Please wait and try again.");
+      return;
+    }
+
+    const svgBytes = new TextEncoder().encode(svgText);
+    const tvgData = wasmConvert(svgBytes);
 
     outputFilename = filename.replace(/\.svg$/i, ".tvg");
     outputBlob = new Blob([tvgData.buffer as ArrayBuffer], { type: "application/octet-stream" });
@@ -113,13 +152,14 @@ function handleSVGInput(svgText: string, filename: string) {
       const reparsed = parseTinyVG(tvgData);
       const roundTripSvg = generateSVG(reparsed, true);
       previewSvg(outputPreviewContent, roundTripSvg);
+      showInfo(outputInfo, `${outputFilename} - ${tvgData.byteLength} bytes, ${reparsed.colorTable.length} colors, ${reparsed.commands.length} commands`);
     } catch {
+      showInfo(outputInfo, `${outputFilename} - ${tvgData.byteLength} bytes`);
       outputPreviewContent.innerHTML = '<p style="color:#94a3b8">Binary TVG output (preview unavailable)</p>';
     }
 
-    showInfo(outputInfo, `${outputFilename} - ${tvgData.byteLength} bytes, ${doc.colorTable.length} colors, ${doc.commands.length} commands`);
     downloadBtn.disabled = false;
-    copyBtn.disabled = true; // Can't copy binary as text
+    copyBtn.disabled = true;
   } catch (e) {
     showError(outputError, `Conversion error: ${e}`);
   }
