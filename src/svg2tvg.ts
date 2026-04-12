@@ -13,6 +13,8 @@ import {
   type Point,
   type Style,
   type FlatStyle,
+  type LinearGradientStyle,
+  type RadialGradientStyle,
   type Path,
   type PathSegment,
   type TVGCommand,
@@ -23,6 +25,19 @@ import {
 interface ColorMap {
   colors: RGBA[];
   index: Map<string, number>;
+}
+
+/** Parsed gradient definition from <defs> */
+interface GradientDef {
+  type: "linear" | "radial";
+  x1: number; y1: number; x2: number; y2: number;
+  stops: { offset: number; color: RGBA }[];
+}
+
+/** Map of id -> defs element info */
+interface DefsMap {
+  gradients: Map<string, GradientDef>;
+  unsupportedIds: Set<string>;
 }
 
 function colorKey(c: RGBA): string {
@@ -118,8 +133,121 @@ function getNumAttr(el: Element, name: string, def: number = 0): number {
   return isNaN(n) ? def : n;
 }
 
-function getStyleColor(el: Element, attr: "fill" | "stroke", colorMap: ColorMap): { style: Style; hasColor: boolean } {
+function parseDefsElement(defsEl: Element): DefsMap {
+  const gradients = new Map<string, GradientDef>();
+  const unsupportedIds = new Set<string>();
+
+  for (let i = 0; i < defsEl.children.length; i++) {
+    const child = defsEl.children[i];
+    const id = child.getAttribute("id");
+    if (!id) continue;
+
+    const tag = child.tagName.toLowerCase();
+    if (tag === "lineargradient" || tag === "radialgradient") {
+      const stops: { offset: number; color: RGBA }[] = [];
+      for (let j = 0; j < child.children.length; j++) {
+        const stop = child.children[j];
+        if (stop.tagName.toLowerCase() !== "stop") continue;
+        const offsetStr = stop.getAttribute("offset") || "0";
+        let offset = parseFloat(offsetStr);
+        if (offsetStr.endsWith("%")) offset /= 100;
+        const stopColor = parseColor(
+          stop.getAttribute("stop-color") || stop.getAttribute("style")?.match(/stop-color:\s*([^;]+)/)?.[1] || "black",
+          parseFloat(stop.getAttribute("stop-opacity") || "1")
+        ) || { r: 0, g: 0, b: 0, a: 1 };
+        stops.push({ offset, color: stopColor });
+      }
+
+      if (tag === "lineargradient") {
+        gradients.set(id, {
+          type: "linear",
+          x1: getNumAttr(child, "x1", 0),
+          y1: getNumAttr(child, "y1", 0),
+          x2: getNumAttr(child, "x2", 1),
+          y2: getNumAttr(child, "y2", 0),
+          stops,
+        });
+      } else {
+        // radialGradient: cx,cy is center, r is radius; map to point1=center, point2=edge
+        const cx = getNumAttr(child, "cx", 0.5);
+        const cy = getNumAttr(child, "cy", 0.5);
+        const r = getNumAttr(child, "r", 0.5);
+        gradients.set(id, {
+          type: "radial",
+          x1: cx, y1: cy,
+          x2: cx + r, y2: cy,
+          stops,
+        });
+      }
+    } else {
+      unsupportedIds.add(id);
+    }
+  }
+
+  return { gradients, unsupportedIds };
+}
+
+/** Magenta fallback for unsupported url() references */
+const FALLBACK_COLOR: RGBA = { r: 1, g: 0, b: 1, a: 1 };
+
+function resolveUrlRef(urlStr: string, defsMap: DefsMap, colorMap: ColorMap): { style: Style; hasColor: boolean } {
+  const idMatch = urlStr.match(/url\(\s*#([^)]+)\s*\)/);
+  if (!idMatch) {
+    return { style: { type: StyleType.Flat, colorIndex: 0 } as FlatStyle, hasColor: false };
+  }
+
+  const id = idMatch[1];
+  const grad = defsMap.gradients.get(id);
+
+  if (grad) {
+    // TinyVG gradients only support 2 color stops (start and end)
+    // Pick the first and last stop colors
+    const c1 = grad.stops.length > 0 ? grad.stops[0].color : { r: 0, g: 0, b: 0, a: 1 };
+    const c2 = grad.stops.length > 1 ? grad.stops[grad.stops.length - 1].color : c1;
+    const ci1 = getOrAddColor(colorMap, c1);
+    const ci2 = getOrAddColor(colorMap, c2);
+
+    if (grad.type === "linear") {
+      return {
+        style: {
+          type: StyleType.LinearGradient,
+          point1: { x: grad.x1, y: grad.y1 },
+          point2: { x: grad.x2, y: grad.y2 },
+          colorIndex1: ci1,
+          colorIndex2: ci2,
+        } as LinearGradientStyle,
+        hasColor: true,
+      };
+    } else {
+      return {
+        style: {
+          type: StyleType.RadialGradient,
+          point1: { x: grad.x1, y: grad.y1 },
+          point2: { x: grad.x2, y: grad.y2 },
+          colorIndex1: ci1,
+          colorIndex2: ci2,
+        } as RadialGradientStyle,
+        hasColor: true,
+      };
+    }
+  }
+
+  // Unsupported ref (pattern, clipPath, etc.) -> magenta fallback
+  const idx = getOrAddColor(colorMap, FALLBACK_COLOR);
+  return { style: { type: StyleType.Flat, colorIndex: idx } as FlatStyle, hasColor: true };
+}
+
+function getStyleColor(el: Element, attr: "fill" | "stroke", colorMap: ColorMap, defsMap: DefsMap): { style: Style; hasColor: boolean } {
   const colorStr = getAttr(el, attr) || (attr === "fill" ? "black" : null);
+  if (!colorStr || colorStr === "none" || colorStr === "transparent") {
+    return { style: { type: StyleType.Flat, colorIndex: 0 } as FlatStyle, hasColor: false };
+  }
+
+  // Handle url() references
+  if (colorStr.startsWith("url(")) {
+    return resolveUrlRef(colorStr, defsMap, colorMap);
+  }
+
   const opacityStr = getAttr(el, attr + "-opacity") || getAttr(el, "opacity");
   const opacity = opacityStr ? parseFloat(opacityStr) : 1;
 
@@ -316,7 +444,7 @@ function parseSVGPathD(d: string): { origin: Point; segments: PathSegment[] } | 
   return { origin, segments };
 }
 
-function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[]): void {
+function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[], defsMap: DefsMap): void {
   const tag = el.tagName.toLowerCase();
 
   switch (tag) {
@@ -327,8 +455,8 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
       const h = getNumAttr(el, "height");
       if (w <= 0 || h <= 0) break;
 
-      const fill = getStyleColor(el, "fill", colorMap);
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const fill = getStyleColor(el, "fill", colorMap, defsMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (fill.hasColor && stroke.hasColor) {
@@ -365,8 +493,8 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
         ],
       };
 
-      const fill = getStyleColor(el, "fill", colorMap);
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const fill = getStyleColor(el, "fill", colorMap, defsMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (fill.hasColor && stroke.hasColor) {
@@ -395,8 +523,8 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
         ],
       };
 
-      const fill = getStyleColor(el, "fill", colorMap);
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const fill = getStyleColor(el, "fill", colorMap, defsMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (fill.hasColor && stroke.hasColor) {
@@ -415,7 +543,7 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
       const x2 = getNumAttr(el, "x2");
       const y2 = getNumAttr(el, "y2");
 
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (stroke.hasColor) {
@@ -435,7 +563,7 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
       const points = parsePointsList(pointsStr);
       if (points.length < 2) break;
 
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (stroke.hasColor) {
@@ -455,8 +583,8 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
       const points = parsePointsList(pointsStr);
       if (points.length < 3) break;
 
-      const fill = getStyleColor(el, "fill", colorMap);
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const fill = getStyleColor(el, "fill", colorMap, defsMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (fill.hasColor && stroke.hasColor) {
@@ -480,8 +608,8 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
       const parsed = parseSVGPathD(d);
       if (!parsed || parsed.segments.length === 0) break;
 
-      const fill = getStyleColor(el, "fill", colorMap);
-      const stroke = getStyleColor(el, "stroke", colorMap);
+      const fill = getStyleColor(el, "fill", colorMap, defsMap);
+      const stroke = getStyleColor(el, "stroke", colorMap, defsMap);
       const strokeWidth = getNumAttr(el, "stroke-width", 1);
 
       if (fill.hasColor && stroke.hasColor) {
@@ -502,7 +630,7 @@ function convertElement(el: Element, colorMap: ColorMap, commands: TVGCommand[])
     default: {
       // Recurse into children
       for (let c = 0; c < el.children.length; c++) {
-        convertElement(el.children[c], colorMap, commands);
+        convertElement(el.children[c], colorMap, commands, defsMap);
       }
       break;
     }
@@ -552,10 +680,21 @@ export function svgToTinyVG(svgString: string): TinyVGDocument {
   // Add a transparent color at index 0 as fallback
   getOrAddColor(colorMap, { r: 0, g: 0, b: 0, a: 0 });
 
+  // Parse all <defs> blocks
+  const defsMap: DefsMap = { gradients: new Map(), unsupportedIds: new Set() };
+  for (let i = 0; i < svgEl.children.length; i++) {
+    const child = svgEl.children[i];
+    if (child.tagName.toLowerCase() === "defs") {
+      const parsed = parseDefsElement(child);
+      parsed.gradients.forEach((v, k) => defsMap.gradients.set(k, v));
+      parsed.unsupportedIds.forEach((v) => defsMap.unsupportedIds.add(v));
+    }
+  }
+
   for (let i = 0; i < svgEl.children.length; i++) {
     const child = svgEl.children[i];
     if (child.tagName.toLowerCase() === "defs") continue;
-    convertElement(child, colorMap, commands);
+    convertElement(child, colorMap, commands, defsMap);
   }
 
   // Pick coordinate range
